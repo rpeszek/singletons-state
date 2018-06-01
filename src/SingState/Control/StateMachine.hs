@@ -1,5 +1,4 @@
-{-# LANGUAGE TemplateHaskell
-      , KindSignatures
+{-# LANGUAGE KindSignatures
       , DataKinds
       , GADTs
       , PolyKinds
@@ -28,6 +27,14 @@
 -- Portability :  non-portable
 --
 -- `Indexed Monad` abstraction for dependently typed state machines.
+-- This approach mimics 'monad-param' library approach
+-- 'Control.Monad.Parameterized' that binds across potentially 
+-- different monads.
+-- Here state machine is parametrized by inital state and a type level
+-- function that defines end state in terms of the current payload/result 
+-- type.  States are expected to belong to a dedicated kind 'ks', but 
+-- binding can happen between different state machines with different 
+-- state kinds. 
 --------------------------------------------------------------------
 
 module SingState.Control.StateMachine where
@@ -66,7 +73,7 @@ class SmPure (m :: SM_sig ks kr) where
 class InitState (s :: ks) (sf :: kr ~> ks) (m :: SM_sig ks kr) where
     smInit :: Sing a -> m s sf a
 
--- | This approach is similar to one found in @monad-param@ 'Control.Monad.Parameterized'
+-- | This approach is similar to one found in 'monad-param' 'Control.Monad.Parameterized'
 -- allows to combine computations from 2 different state machines 'm1' and 'm2' 
 -- with different state kinds 'ks1' and 'ks2'
 -- 'tr' is a type level transform that maps states used by 'm1' and 'm2'.
@@ -135,13 +142,16 @@ smLift f m = m >>>= (smInit . f )
 -- | Represents a list of state machines sharing the same return kind 'kr'
 -- that can be executed in monad 'n'.
 -- Each element in the list needs to match states with previous and next element
-data SmList n kr (s :: ks) (ms :: [Type]) where 
-   SmNil :: SmList n kr s '[]
+data SmQueue n kr (s :: ks) (ms :: [Type]) where 
+   SmNil :: SmQueue n kr s '[]
    SmCons :: SmGo m n => 
              m stateb statee_fn (a :: kr) -> 
-             SmList n kr (statee_fn @@ a) ms -> 
-             SmList n kr stateb ((m stateb statee_fn a) ': ms)
+             SmQueue n kr (statee_fn @@ a) ms -> 
+             SmQueue n kr stateb ((m stateb statee_fn a) ': ms)
 
-runSmSequence :: (Monad n) => SmList n kr s ms -> n [SomeSing kr] 
+-- TODO smFold
+
+-- | Computes a list of results from the chain (could be usefull for tracing etc).
+runSmSequence :: (Monad n) => SmQueue n kr s ms -> n [SomeSing kr] 
 runSmSequence SmNil  = return []
-runSmSequence (SmCons m smList) = (:) <$> runSM m <*> runSmSequence smList
+runSmSequence (SmCons m smQueue) = (:) <$> runSM m <*> runSmSequence smQueue
